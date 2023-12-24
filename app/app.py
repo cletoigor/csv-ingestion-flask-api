@@ -293,7 +293,15 @@ def restart_server():
 
 # Initialize the Flask application and socket status checking
 app = Flask(__name__)
-socketio = SocketIO(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
+
+@socketio.on('connect', namespace='/my_namespace')
+def connect():
+    print('Client connected')
+
+@socketio.on('disconnect')
+def disconnect():
+    print('client disconnected')
 
 #--------------------------------------------------------------------------------------------------------------------------
 # Create the API Endpoints
@@ -313,7 +321,9 @@ def upload_csv():
     if file and file.filename.endswith('.csv'):
         # Parse the CSV file
         try:
-            socketio.emit('data_ingestion_status', {'message': 'Data ingestion started'})
+
+            socketio.emit('data_ingestion_status', {'message': 'Data ingestion started'},namespace='/my_namespace')
+
             # Temporary save the file
             file_path = os.path.join('temp', file.filename)
             file.save(file_path)
@@ -324,19 +334,28 @@ def upload_csv():
 
             # Insert data into the RAW Database
             create_table_and_insert_data(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=DB_NAME, file_path=file_path, file_name=table_name, overwrite=True)
+            socketio.emit('data_ingestion_status', {'message': 'Data ingestion completed'},namespace='/my_namespace')
 
             # Transform raw data into bronze data
+            socketio.emit('data_transformation_status', {'message': 'Data transformation started'},namespace='/my_namespace')
+
             create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='bronze')
             transform_data_to_bronze(raw_db_name=DB_NAME,raw_table_name=table_name,bronze_db_name='bronze',db_user=DB_USER,db_pass=DB_PASS,db_host=DB_HOST,db_port=DB_PORT)
+
+            socketio.emit('data_transformation_status', {'message': 'Bronze layer created'},namespace='/my_namespace')
 
             # Transform bronze data into silver data
             bronze_table_name = f"bronze_{table_name}"
             create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='silver')
             transform_data_to_silver(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, bronze_db_name='bronze', bronze_table_name=bronze_table_name, silver_db_name='silver', silver_table_name='silver_grouped_trips')
 
+            socketio.emit('data_transformation_status', {'message': 'Silver layer created'},namespace='/my_namespace')
+            socketio.emit('data_transformation_status', {'message': 'Data transformation completed'},namespace='/my_namespace')
+
             # Cleanup
             os.remove(file_path)
-            socketio.emit('data_ingestion_status', {'message': 'Data ingestion completed'})
+
+            
             return jsonify({'message': 'File uploaded and saved to database successfully'}), 200
 
         except Exception as e:
@@ -357,17 +376,25 @@ def weekly_average_trips():
     min_lon = request.args.get('min_lon', type=float)
     max_lon = request.args.get('max_lon', type=float)
 
+    socketio.emit('weekly_average_trips_status', {'message': 'Fetch weekly average trips started'},namespace='/my_namespace')
+
     try:
         if region:
             data_json = fetch_weekly_average_trips(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=db_name, table_name=table_name, region=region)
+            socketio.emit('weekly_average_trips_status', {'message': 'Fetch weekly average trips by REGION'},namespace='/my_namespace')
+
         elif all([min_lat, max_lat, min_lon, max_lon]):
             data_json = fetch_weekly_average_trips(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=db_name, table_name=table_name, min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon)
+            socketio.emit('weekly_average_trips_status', {'message': 'Fetch weekly average trips by BOUDING BOX'},namespace='/my_namespace')
+
         else:
             return jsonify({'error': 'Insufficient parameters. Please provide either a region or coordinates.'}), 400
 
+        socketio.emit('weekly_average_trips_status', {'message': 'Fetch weekly average trips concluded'},namespace='/my_namespace')
         return jsonify({'data': json.loads(data_json)})
 
     except Exception as e:
+        socketio.emit('weekly_average_trips_status', {'message': 'Fetch weekly average trips error'},namespace='/my_namespace')
         return jsonify({'error': str(e)}), 500
 
 #--------------------------------------------------------------------------------------------------------------------------
@@ -376,6 +403,7 @@ def weekly_average_trips():
 def trigger_restart():
     # Start a separate thread to restart the server
     threading.Thread(target=restart_server).start()
+    socketio.emit('trigger_restart', {'message': 'Server will be restared'},namespace='/my_namespace')
     return jsonify({'message': 'Server restarting...'}), 200
 
 #--------------------------------------------------------------------------------------------------------------------------
