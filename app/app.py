@@ -17,6 +17,7 @@ import psycopg2
 from psycopg2 import sql
 import json
 from flask_socketio import SocketIO
+from flask_swagger import swagger
 
 # Database connection parameters
 DB_HOST = "localhost"
@@ -305,8 +306,46 @@ def disconnect():
 
 #--------------------------------------------------------------------------------------------------------------------------
 # Create the API Endpoints
+    
+@app.route("/spec")
+def spec():
+    """
+    Get the Swagger specification
+    ---
+    tags:
+      - Documentation
+    responses:
+      200:
+        description: Swagger specification
+    """
+    swag = swagger(app)
+    swag['info']['version'] = "1.0"
+    swag['info']['title'] = "My API"
+    return jsonify(swag)
+
 @app.route('/upload-csv', methods=['POST'])
 def upload_csv():
+    """
+    Upload a CSV file for data processing
+    ---
+    tags:
+      - CSV Upload
+    consumes:
+      - multipart/form-data
+    parameters:
+      - in: formData
+        name: file
+        type: file
+        required: true
+        description: The CSV file to upload.
+    responses:
+      200:
+        description: File uploaded and processed successfully
+      400:
+        description: No file part in the request or no file selected
+      500:
+        description: Internal server error
+    """
 
     # Check if a file is part of the request
     if 'file' not in request.files:
@@ -368,6 +407,54 @@ def upload_csv():
 
 @app.route('/weekly-average-trips', methods=['GET'])
 def weekly_average_trips():
+    """
+    Get weekly average number of trips
+    ---
+    tags:
+      - Analytics
+    parameters:
+      - name: db_name
+        in: query
+        type: string
+        required: true
+        description: Database name
+      - name: table_name
+        in: query
+        type: string
+        required: true
+        description: Table name
+      - name: region
+        in: query
+        type: string
+        description: Region name for filtering
+      - name: min_lat
+        in: query
+        type: number
+        format: float
+        description: Minimum latitude of the bounding box
+      - name: max_lat
+        in: query
+        type: number
+        format: float
+        description: Maximum latitude of the bounding box
+      - name: min_lon
+        in: query
+        type: number
+        format: float
+        description: Minimum longitude of the bounding box
+      - name: max_lon
+        in: query
+        type: number
+        format: float
+        description: Maximum longitude of the bounding box
+    responses:
+      200:
+        description: Weekly average trip data
+      400:
+        description: Insufficient parameters
+      500:
+        description: Internal server error
+    """
     db_name = request.args.get('db_name')
     table_name = request.args.get('table_name')
     region = request.args.get('region')
@@ -401,6 +488,15 @@ def weekly_average_trips():
 
 @app.route('/restart-server', methods=['POST'])
 def trigger_restart():
+    """
+    Restart the server
+    ---
+    tags:
+      - Server Control
+    responses:
+      200:
+        description: Server is restarting
+    """
     # Start a separate thread to restart the server
     threading.Thread(target=restart_server).start()
     socketio.emit('trigger_restart', {'message': 'Server will be restared'},namespace='/my_namespace')
