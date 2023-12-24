@@ -16,6 +16,7 @@ import time
 import psycopg2
 from psycopg2 import sql
 import json
+from flask_socketio import SocketIO
 
 # Database connection parameters
 DB_HOST = "localhost"
@@ -290,8 +291,9 @@ def restart_server():
 # Flask Data Ingestion API
 #--------------------------------------------------------------------------------------------------------------------------
 
-# Initialize the Flask application
+# Initialize the Flask application and socket status checking
 app = Flask(__name__)
+socketio = SocketIO(app)
 
 #--------------------------------------------------------------------------------------------------------------------------
 # Create the API Endpoints
@@ -311,6 +313,7 @@ def upload_csv():
     if file and file.filename.endswith('.csv'):
         # Parse the CSV file
         try:
+            socketio.emit('data_ingestion_status', {'message': 'Data ingestion started'})
             # Temporary save the file
             file_path = os.path.join('temp', file.filename)
             file.save(file_path)
@@ -333,6 +336,7 @@ def upload_csv():
 
             # Cleanup
             os.remove(file_path)
+            socketio.emit('data_ingestion_status', {'message': 'Data ingestion completed'})
             return jsonify({'message': 'File uploaded and saved to database successfully'}), 200
 
         except Exception as e:
@@ -377,4 +381,4 @@ def trigger_restart():
 #--------------------------------------------------------------------------------------------------------------------------
 # Run the Flask app
 if __name__ == '__main__':
-    app.run(port=8000,debug=True)
+    socketio.run(app, port=8000, debug=True)
