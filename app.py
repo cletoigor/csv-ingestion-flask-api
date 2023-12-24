@@ -164,12 +164,9 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
     conn_raw.close()
     conn_bronze.close()
 
-
-    conn_silver.close()
-
-def create_or_fetch_weekly_average_trips(db_user, db_pass, db_host, db_port, bronze_table_name, bronze_db_name='bronze',create_new=False):
+def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_name, silver_table_name, silver_db_name='silver', bronze_db_name='bronze'):
     """
-    Either creates a new table in the 'silver' database for the weekly average number of trips or fetches the data.
+    Groups trips by similar origin, destination, and time of day from the bronze database and saves the result to the silver database.
 
     :param db_user: Database username
     :param db_pass: Database password
@@ -177,36 +174,56 @@ def create_or_fetch_weekly_average_trips(db_user, db_pass, db_host, db_port, bro
     :param db_port: Database port
     :param bronze_db_name: Name of the bronze database
     :param bronze_table_name: Name of the table in the bronze database
-    :param create_new: Flag to indicate whether to create a new table (True) or fetch data (False)
-    :return: JSON payload of the data if create_new is False
+    :param silver_db_name: Name of the silver database
+    :param silver_table_name: Name of the table to create in the silver database
     """
 
     # Connect to the bronze database
-    conn = psycopg2.connect(dbname=bronze_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
-    
-    if create_new:
-        # Logic to create a new table
-        pass  # Replace with actual logic to create a new table
-    else:
-        # Fetch data logic
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT
-                    DATE_TRUNC('week', date) AS week,
-                    COUNT(*) / COUNT(DISTINCT DATE_TRUNC('week', date)) AS weekly_avg_trips
-                FROM {}
-                GROUP BY week;
-            """.format(bronze_table_name))  # Assuming 'date' column exists in the table
+    conn_bronze = psycopg2.connect(dbname=bronze_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    conn_bronze.autocommit = True
 
-            result = cursor.fetchall()
-            # Convert the result to JSON
-            result_json = json.dumps([{"week": row[0].strftime("%Y-%m-%d"), "weekly_avg_trips": row[1]} for row in result])
+    # Connect to the silver database
+    conn_silver = psycopg2.connect(dbname=silver_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    conn_silver.autocommit = True
 
-        conn.close()
-        return result_json
+    with conn_bronze.cursor() as cursor_bronze:
+        # Assuming columns for origin, destination, and time are named 'origin', 'destination', and 'time' respectively
+        cursor_bronze.execute("""
+            SELECT
+                origin_latitude,
+                origin_longitude,
+                destination_latitude,
+                destination_longitude,
+                EXTRACT(HOUR FROM time) AS hour_of_day,
+                COUNT(*) AS trip_count
+            FROM {}
+            GROUP BY origin_latitude, origin_longitude, destination_latitude, destination_longitude, hour_of_day;
+        """.format(bronze_table_name))
 
-# Example usage:
-# data_json = create_or_fetch_weekly_average_trips(DB_USER, DB_PASS, DB_HOST, DB_PORT, 'bronze', 'bronze_table_name', create_new=False)
+        result = cursor_bronze.fetchall()
+
+    conn_bronze.close()
+
+    with conn_silver.cursor() as cursor_silver:
+        # Create the table in the silver database
+        cursor_silver.execute("""
+            CREATE TABLE IF NOT EXISTS {} (
+                origin_latitude FLOAT,
+                origin_longitude FLOAT,
+                destination_latitude FLOAT,
+                destination_longitude FLOAT,
+                hour_of_day INT,
+                trip_count INT
+            );
+        """.format(silver_table_name))
+
+        # Insert the grouped data into the silver table
+        cursor_silver.executemany("""
+            INSERT INTO {} (origin_latitude, origin_longitude, destination_latitude, destination_longitude, hour_of_day, trip_count)
+            VALUES (%s, %s, %s, %s,  %s,  %s)
+        """.format(silver_table_name), result)
+
+    conn_silver.close()
 
 def restart_server():
     time.sleep(1)  # Short delay to ensure the response is sent
@@ -252,8 +269,10 @@ def upload_csv():
             create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='bronze')
             transform_data_to_bronze(raw_db_name=DB_NAME,raw_table_name=table_name,bronze_db_name='bronze',db_user=DB_USER,db_pass=DB_PASS,db_host=DB_HOST,db_port=DB_PORT)
 
+            # Transform bronze data into silver data
             bronze_table_name = f"bronze_{table_name}"
-            create_silver_database_for_regions(db_user=DB_USER,db_pass=DB_PASS,db_host=DB_HOST,db_port=DB_PORT,bronze_db_name=bronze_table_name)
+            create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='silver')
+            transform_data_to_silver(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, bronze_db_name='bronze', bronze_table_name=bronze_table_name, silver_db_name='silver', silver_table_name='silver_grouped_trips')
 
             # Cleanup
             os.remove(file_path)
@@ -267,44 +286,8 @@ def upload_csv():
 
 #--------------------------------------------------------------------------------------------------------------------------
 
-@app.route('/weekly-average-trips', methods=['GET'])
-def weekly_average_trips():
-    
-    create_db = request.args.get('create_db', 'true').lower() == 'true'
-    file_name = request.args.get('file_name')
-
-    if not file_name:
-        return jsonify({'error': 'Missing file name'}), 400
-
-    bronze_table_name = f"bronze_{file_name}"
-
-    try:
-        if create_db:
-            # Create database,table and insert data
-            create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='silver')
-
-            create_or_fetch_weekly_average_trips(DB_USER, DB_PASS, DB_HOST, DB_PORT, 'bronze', bronze_table_name, create_new=True)
-
-            message = 'Silver table created from bronze table successfully'
-
-        else:
-            # Fetch data as JSON
-            data_json = create_or_fetch_weekly_average_trips(DB_USER, DB_PASS, DB_HOST, DB_PORT, 'bronze', bronze_table_name, create_new=False)
-            return jsonify({'data': data_json})
-
-        return jsonify({'message': message}), 200
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-# Define your other functions here...
-# - create_silver_table_from_bronze
-# - create_or_fetch_weekly_average_trips
-# - etc.
-
-if __name__ == '__main__':
-    app.run(debug=True)
-
+# @app.route('/weekly-average-trips', methods=['GET'])
+# def weekly_average_trips():
 
 #--------------------------------------------------------------------------------------------------------------------------
 
