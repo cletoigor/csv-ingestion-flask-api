@@ -225,6 +225,63 @@ def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_na
 
     conn_silver.close()
 
+def fetch_weekly_average_trips(db_user, db_pass, db_host, db_port, db_name, table_name, min_lat=None, max_lat=None, min_lon=None, max_lon=None, region=None):
+    """
+    Calculates and fetches the weekly average number of trips from the specified table.
+    The data can be filtered by either a bounding box (coordinates) or a region.
+
+    :param db_user: Database username
+    :param db_pass: Database password
+    :param db_host: Database host address
+    :param db_port: Database port
+    :param bronze_db_name: Name of the bronze database
+    :param bronze_table_name: Name of the table in the bronze database
+    :param min_lat: Minimum latitude of the bounding box (optional)
+    :param max_lat: Maximum latitude of the bounding box (optional)
+    :param min_lon: Minimum longitude of the bounding box (optional)
+    :param max_lon: Maximum longitude of the bounding box (optional)
+    :param region: Name of the region (optional)
+    :return: JSON payload of the data
+    """
+
+    # Connect to the bronze database
+    conn = psycopg2.connect(dbname=db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+
+    try:
+        with conn.cursor() as cursor:
+            # Construct the WHERE clause based on provided parameters
+            where_clause = ""
+            if region:
+                where_clause = "WHERE UPPER(region) = UPPER(%s)"
+                params = (region,)
+            elif all([min_lat, max_lat, min_lon, max_lon]):
+                where_clause = "WHERE origin_latitude BETWEEN %s AND %s AND origin_longitude BETWEEN %s AND %s"
+                params = (min_lat, max_lat, min_lon, max_lon)
+            else:
+                raise ValueError("Either region or bounding box coordinates must be provided")
+
+            # Execute the query
+            cursor.execute(sql.SQL("""
+                SELECT
+                    DATE_TRUNC('week', date) AS week,
+                    COUNT(*) / COUNT(DISTINCT DATE_TRUNC('week', date)) AS weekly_avg_trips
+                FROM {}
+                {}
+                GROUP BY week;
+            """).format(sql.Identifier(table_name), sql.SQL(where_clause)), params)
+
+            # Fetch the result and convert to JSON
+            result = cursor.fetchall()
+            result_json = json.dumps([{"week": row[0].strftime("%Y-%m-%d"), "weekly_avg_trips": row[1]} for row in result])
+
+            return result_json
+
+    except Exception as e:
+        raise e
+
+    finally:
+        conn.close()
+
 def restart_server():
     time.sleep(1)  # Short delay to ensure the response is sent
     os.kill(os.getpid(), signal.SIGINT)
@@ -286,8 +343,28 @@ def upload_csv():
 
 #--------------------------------------------------------------------------------------------------------------------------
 
-# @app.route('/weekly-average-trips', methods=['GET'])
-# def weekly_average_trips():
+@app.route('/weekly-average-trips', methods=['GET'])
+def weekly_average_trips():
+    db_name = request.args.get('db_name')
+    table_name = request.args.get('table_name')
+    region = request.args.get('region')
+    min_lat = request.args.get('min_lat', type=float)
+    max_lat = request.args.get('max_lat', type=float)
+    min_lon = request.args.get('min_lon', type=float)
+    max_lon = request.args.get('max_lon', type=float)
+
+    try:
+        if region:
+            data_json = fetch_weekly_average_trips(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=db_name, table_name=table_name, region=region)
+        elif all([min_lat, max_lat, min_lon, max_lon]):
+            data_json = fetch_weekly_average_trips(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=db_name, table_name=table_name, min_lat=min_lat, max_lat=max_lat, min_lon=min_lon, max_lon=max_lon)
+        else:
+            return jsonify({'error': 'Insufficient parameters. Please provide either a region or coordinates.'}), 400
+
+        return jsonify({'data': json.loads(data_json)})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 #--------------------------------------------------------------------------------------------------------------------------
 
