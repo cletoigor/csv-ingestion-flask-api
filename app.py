@@ -138,7 +138,7 @@ def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, fi
 def trigger_restart():
     # Start a separate thread to restart the server
     threading.Thread(target=restart_server).start()
-    return 'Server restarting...', 200
+    return jsonify({'message': 'Server restarting...'}), 200
 
 def restart_server():
     time.sleep(1)  # Short delay to ensure the response is sent
