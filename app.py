@@ -54,10 +54,10 @@ def upload_csv():
             table_name = os.path.splitext(file.filename)[0]  # Table name is the filename without extension
 
             # Create the postegresql RAW Database
-            create_database_if_not_exists(DB_USER, DB_PASS, DB_HOST, DB_PORT, DB_NAME)
+            create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name=DB_NAME)
 
             # Insert data into the RAW Database
-            create_table_and_insert_data(DB_NAME, DB_USER, DB_PASS, DB_HOST, DB_PORT, file_path, table_name)
+            create_table_and_insert_data(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, db_name=DB_NAME, file_path=file_path, file_name=table_name, overwrite=True)
 
             # Cleanup
             os.remove(file_path)
@@ -70,7 +70,7 @@ def upload_csv():
         return jsonify({'error': 'Invalid file format'}), 400
     
     
-def create_database_if_not_exists(db_user, db_pass, db_host, db_port, target_db):
+def create_database_if_not_exists(db_name, db_user, db_pass, db_host, db_port):
     """
     Connects to the PostgreSQL server and creates the target database if it does not exist.
 
@@ -86,18 +86,25 @@ def create_database_if_not_exists(db_user, db_pass, db_host, db_port, target_db)
 
     with conn.cursor() as cursor:
         # Check if the target database exists
-        cursor.execute(sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s"), (target_db,))
+        cursor.execute(sql.SQL("SELECT 1 FROM pg_database WHERE datname = %s"), (db_name,))
         exists = cursor.fetchone()
 
         # If the database does not exist, create it
         if not exists:
-            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(target_db)))
+            cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(db_name)))
 
     conn.close()
 
-def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, file_path, file_name):
+import psycopg2
+import psycopg2.extras
+import csv
+import os
+from psycopg2 import sql
+
+def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, file_path, file_name, overwrite=True):
     """
     Creates a table in the PostgreSQL database based on the CSV file's headers and inserts data.
+    Can optionally overwrite the existing table or append to it.
 
     :param db_name: Database name
     :param db_user: Database username
@@ -106,6 +113,7 @@ def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, fi
     :param db_port: Database port
     :param file_path: Path to the CSV file
     :param file_name: Name of the file (used to name the table)
+    :param overwrite: If True, overwrite existing table; if False, append to it
     """
 
     # Connect to the database
@@ -117,12 +125,13 @@ def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, fi
         headers = next(reader)  # Assuming the first row is the header
         table_name = os.path.splitext(file_name)[0]  # Table name is the filename without extension
 
-        # Create table
-        cursor.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(table_name)))
-        cursor.execute(sql.SQL("CREATE TABLE {} ({})").format(
-            sql.Identifier(table_name),
-            sql.SQL(', ').join([sql.Identifier(header) + sql.SQL(' VARCHAR') for header in headers])
-        ))
+        if overwrite:
+            # Drop the table if it exists and then create it
+            cursor.execute(sql.SQL("DROP TABLE IF EXISTS {}").format(sql.Identifier(table_name)))
+            cursor.execute(sql.SQL("CREATE TABLE {} ({})").format(
+                sql.Identifier(table_name),
+                sql.SQL(', ').join([sql.Identifier(header) + sql.SQL(' VARCHAR') for header in headers])
+            ))
 
         # Insert data
         for row in reader:
@@ -131,6 +140,7 @@ def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, fi
             cursor.execute(insert_query, row)
 
     conn.close()
+
 
 #--------------------------------------------------------------------------------------------------------------------------
 
