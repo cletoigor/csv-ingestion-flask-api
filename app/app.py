@@ -19,12 +19,24 @@ import json
 from flask_socketio import SocketIO
 from flask_swagger import swagger
 
+# Function to load database configuration from a file
+def load_db_config(filename):
+    with open(filename, 'r') as file:
+        lines = file.readlines()
+        for line in lines:
+            if line.strip():
+                key, value = line.strip().split('=')
+                os.environ[key] = value
+
+# Load database configuration
+load_db_config('db_config.txt')
+
 # Database connection parameters
-DB_HOST = "localhost"
-DB_NAME = "raw"
-DB_USER = "postgres"
-DB_PASS = "admin"
-DB_PORT = "5433"
+DB_HOST = os.getenv('DB_HOST')
+DB_NAME = os.getenv('DB_NAME')
+DB_USER = os.getenv('DB_USER')
+DB_PASS = os.getenv('DB_PASS')
+DB_PORT = os.getenv('DB_PORT')
 
 #--------------------------------------------------------------------------------------------------------------------------
 # Methods
