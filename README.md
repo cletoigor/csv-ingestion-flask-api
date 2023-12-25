@@ -20,7 +20,7 @@ The solution is based on the data architecture illustrated in the image below an
 * **SQL Database Integration:** <br /> Utilizes a PostgreSQL database for data storage and processing.
   
 **API Docs** <br />
-[Flask API SwaggerHub]([https://www.example.com](https://app.swaggerhub.com/apis/IgorCleto/data_engineering_challenge_api/1.0#/)https://app.swaggerhub.com/apis/IgorCleto/data_engineering_challenge_api/1.0#/)
+[Flask API SwaggerHub](https://app.swaggerhub.com/apis/IgorCleto/data_engineering_challenge_api/1.0#/)
 
 **Data Warehouse layers** <br />
 * **Bronze Layer:** <br />
