@@ -29,7 +29,7 @@ def load_db_config(filename):
                 os.environ[key] = value
 
 # Load database configuration
-load_db_config('app/db_config.txt')
+load_db_config('db_config.txt')
 
 # Database connection parameters
 DB_HOST = os.getenv('DB_HOST')
