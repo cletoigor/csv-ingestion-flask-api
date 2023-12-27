@@ -47,7 +47,7 @@ Ensure you have the following installed:
 Clone the repository to your local machine using Git:
 
 ```console
-git clone https://github.com/cletoigor/csvingestion.git
+git clone https://github.com/cletoigor/csv-ingestion-flask-api.git
 ```
 2) **Create a Virtual Environment (Optional but Recommended)**
    
