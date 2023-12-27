@@ -137,8 +137,7 @@ Watch the client's terminal or command prompt window for real-time status update
  9) **Monitoring**
 <br /> Keep an eye on both the Flask application's terminal and the client's terminal. The Flask application terminal will show server logs and any potential errors, while the client's terminal will display the real-time status updates.
 
-10) In the 'sql' directory, there is also an SQL file containing the necessary query to replicate the result of weekly trips grouped by region or by coordinates directly in the PostgreSQL database generated.
-
+10) In the 'sql' directory, there is also an SQL file containing the necessary query to replicate the result of weekly trips grouped by region or by coordinates, latest datasource per region and what region has the "cheap_mobile" datasource, directly in the PostgreSQL database generated.
 
 
 
