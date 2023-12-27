@@ -107,7 +107,7 @@ def create_table_and_insert_data(db_name, db_user, db_pass, db_host, db_port, fi
 
     conn.close()
 
-def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_host, db_port, bronze_db_name='bronze'):
+def transform_data_to_silver(bronze_db_name, bronze_table_name, db_user, db_pass, db_host, db_port, silver_db_name='silver'):
     """
     Transforms data from the 'raw' database table and loads it into the 'bronze' database.
 
@@ -121,11 +121,11 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
     """
 
     # Connect to the raw database
-    conn_raw = psycopg2.connect(dbname=raw_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    conn_raw = psycopg2.connect(dbname=bronze_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
     conn_raw.autocommit = True
 
-    # Connect to the bronze database
-    conn_bronze = psycopg2.connect(dbname=bronze_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    # Connect to the silver database
+    conn_bronze = psycopg2.connect(dbname=silver_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
     conn_bronze.autocommit = True
 
     with conn_raw.cursor() as cursor_raw, conn_bronze.cursor() as cursor_bronze:
@@ -144,7 +144,7 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
                 FROM {}
             )
             SELECT * FROM cte;
-        """).format(sql.Identifier(raw_table_name))
+        """).format(sql.Identifier(bronze_table_name))
 
         cursor_raw.execute(cte_query)
 
@@ -153,7 +153,7 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
 
         # Define the structure of the bronze table
         cursor_bronze.execute("""
-            CREATE TABLE IF NOT EXISTS bronze_trips (
+            CREATE TABLE IF NOT EXISTS silver_trips (
                 date DATE,
                 time TIME,
                 origin_latitude FLOAT,
@@ -167,7 +167,7 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
 
         # Insert the transformed data into the bronze table
         insert_query = """
-            INSERT INTO bronze_trips (
+            INSERT INTO silver_trips (
                 date, time, origin_latitude, origin_longitude, 
                 destination_latitude, destination_longitude, region, datasource
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
@@ -178,7 +178,7 @@ def transform_data_to_bronze(raw_db_name, raw_table_name, db_user, db_pass, db_h
     conn_raw.close()
     conn_bronze.close()
 
-def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_name, silver_table_name, silver_db_name='silver', bronze_db_name='bronze'):
+def transform_data_to_gold(db_user, db_pass, db_host, db_port, silver_table_name, gold_table_name, gold_db_name='gold', silver_db_name='silver'):
     """
     Groups trips by similar origin, destination, and time of day from the bronze database and saves the result to the silver database.
 
@@ -186,18 +186,18 @@ def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_na
     :param db_pass: Database password
     :param db_host: Database host address
     :param db_port: Database port
-    :param bronze_db_name: Name of the bronze database
-    :param bronze_table_name: Name of the table in the bronze database
+    :param gold_db_name: Name of the gold database
+    :param gold_table_name: Name of the gold table
     :param silver_db_name: Name of the silver database
     :param silver_table_name: Name of the table to create in the silver database
     """
 
     # Connect to the bronze database
-    conn_bronze = psycopg2.connect(dbname=bronze_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    conn_bronze = psycopg2.connect(dbname=silver_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
     conn_bronze.autocommit = True
 
     # Connect to the silver database
-    conn_silver = psycopg2.connect(dbname=silver_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
+    conn_silver = psycopg2.connect(dbname=gold_db_name, user=db_user, password=db_pass, host=db_host, port=db_port)
     conn_silver.autocommit = True
 
     with conn_bronze.cursor() as cursor_bronze:
@@ -212,7 +212,7 @@ def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_na
                 COUNT(*) AS trip_count
             FROM {}
             GROUP BY origin_latitude, origin_longitude, destination_latitude, destination_longitude, hour_of_day;
-        """.format(bronze_table_name))
+        """.format(silver_table_name))
 
         result = cursor_bronze.fetchall()
 
@@ -229,13 +229,13 @@ def transform_data_to_silver(db_user, db_pass, db_host, db_port, bronze_table_na
                 hour_of_day INT,
                 trip_count INT
             );
-        """.format(silver_table_name))
+        """.format(gold_table_name))
 
         # Insert the grouped data into the silver table
         cursor_silver.executemany("""
             INSERT INTO {} (origin_latitude, origin_longitude, destination_latitude, destination_longitude, hour_of_day, trip_count)
             VALUES (%s, %s, %s, %s,  %s,  %s)
-        """.format(silver_table_name), result)
+        """.format(gold_table_name), result)
 
     conn_silver.close()
 
@@ -390,17 +390,17 @@ def upload_csv():
             # Transform raw data into bronze data
             socketio.emit('data_transformation_status', {'message': 'Data transformation started'},namespace='/my_namespace')
 
-            create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='bronze')
-            transform_data_to_bronze(raw_db_name=DB_NAME,raw_table_name=table_name,bronze_db_name='bronze',db_user=DB_USER,db_pass=DB_PASS,db_host=DB_HOST,db_port=DB_PORT)
-
-            socketio.emit('data_transformation_status', {'message': 'Bronze layer created'},namespace='/my_namespace')
-
-            # Transform bronze data into silver data
-            bronze_table_name = f"bronze_{table_name}"
             create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='silver')
-            transform_data_to_silver(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, bronze_db_name='bronze', bronze_table_name=bronze_table_name, silver_db_name='silver', silver_table_name='silver_grouped_trips')
+            transform_data_to_silver(bronze_db_name=DB_NAME,bronze_table_name=table_name,silver_db_name='silver',db_user=DB_USER,db_pass=DB_PASS,db_host=DB_HOST,db_port=DB_PORT)
 
             socketio.emit('data_transformation_status', {'message': 'Silver layer created'},namespace='/my_namespace')
+
+            # Transform bronze data into silver data
+            silver_table_name = f"silver_{table_name}"
+            create_database_if_not_exists(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT,db_name='gold')
+            transform_data_to_gold(db_user=DB_USER, db_pass=DB_PASS, db_host=DB_HOST, db_port=DB_PORT, silver_db_name='silver', silver_table_name=silver_table_name, gold_db_name='gold', gold_table_name='gold_grouped_trips')
+
+            socketio.emit('data_transformation_status', {'message': 'Gold layer created'},namespace='/my_namespace')
             socketio.emit('data_transformation_status', {'message': 'Data transformation completed'},namespace='/my_namespace')
 
             # Cleanup
